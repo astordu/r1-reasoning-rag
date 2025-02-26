@@ -28,19 +28,24 @@ class QAAgent:
         print("Searching for:", question)
         result = self.tavily_client.search(question, max_results=3)    
         retrieved_context = "\n".join([r["content"] for r in result["results"]])
+        print("Retrieved Context: \n", retrieved_context)
         return {"retrieved_context": retrieved_context}
 
     def validate_retrieval(self, state: GraphState):
         print("\n=== STEP 2: VALIDATION ===")
         question = state["question"]
         retrieved_context = state["retrieved_context"]
-        print("Retrieved Context: \n", retrieved_context)
+        
         validation_chain = Prompts.VALIDATE_RETRIEVAL | r1
         llm_output = validation_chain.invoke({"retrieved_context": retrieved_context, "question": question}).content
         
-        reasoning = llm_output.split("<think>")[1].split("</think>")[0].strip()
-        response = llm_output.split("</think>")[1].strip()
-        print("reasoning:", reasoning)
+        if "<think>" in llm_output and "</think>" in llm_output:
+            reasoning = llm_output.split("<think>")[1].split("</think>")[0].strip()
+            response = llm_output.split("</think>")[1].strip()
+        else:
+            reasoning = ""
+            response = llm_output.strip()  # 将整个输出当作 response
+
         strcutured_response = json.loads(response)
         
         router_decision = strcutured_response["status"]
@@ -62,8 +67,15 @@ class QAAgent:
 
         answer_chain = Prompts.ANSWER_QUESTION | r1
         llm_output = answer_chain.invoke({"retrieved_context": context, "question": question}).content
-        reasoning = llm_output.split("<think>")[1].split("</think>")[0].strip()
-        answer = llm_output.split("</think>")[1].strip()
+        
+        # 检查 <think> 标签是否存在
+        if "<think>" in llm_output and "</think>" in llm_output:
+            reasoning = llm_output.split("<think>")[1].split("</think>")[0].strip()
+            answer = llm_output.split("</think>")[1].strip()
+        else:
+            reasoning = ""
+            answer = llm_output.strip()  # 将整个输出当作 answer
+
         return {"answer_to_question": answer}
 
     def find_missing_information(self, state: GraphState):
@@ -81,6 +93,20 @@ class QAAgent:
     @staticmethod
     def decide_route(state: GraphState):
         return state["router_decision"]
+
+
+    # def create_workflow(self):
+    #     workflow = StateGraph(GraphState)
+        
+    #     workflow.add_node("retrieve context", self.retrieve)
+    #     workflow.add_node("answer", self.answer)
+        
+    #     workflow.set_entry_point("retrieve context")
+    #     workflow.add_edge("retrieve context","answer")
+    #     workflow.add_edge("answer", END)
+    #     compiled_graph = workflow.compile()
+    #     compiled_graph.get_graph(xray=1).draw_mermaid_png(output_file_path="agent-architecture.png")
+    #     return compiled_graph
 
     def create_workflow(self):
         workflow = StateGraph(GraphState)
@@ -108,10 +134,14 @@ class QAAgent:
         compiled_graph.get_graph(xray=1).draw_mermaid_png(output_file_path="agent-architecture.png")
         return compiled_graph
 
+
+    
+
     def run(self, question: str):
         result = self.workflow.invoke({"question": question})
         return result["answer_to_question"]
 
 if __name__ == "__main__":
     agent = QAAgent()
-    agent.run("Who is George Washington?")
+    answer = agent.run("《哪吒2》中哪吒的师傅的师傅是谁?")
+    print(answer)
